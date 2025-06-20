@@ -6,6 +6,7 @@ let cart = [];       // 購物車項目
 let allCategories = new Set();
 let currentCategory = "全部分類";
 let currentSearch = "";
+const isManage = window.location.pathname.includes('manage');
 
 const categoryColors = {
   "衣物": "#ff6b6b",
@@ -124,9 +125,11 @@ function renderProducts(productList) {
       : keys;
 
     const styleText = sortedKeys
-      .map(size => `${size}:${p.styles[size].center}`)
+      .map(size => {
+        const stock = isManage ? p.styles[size]?.warehouse : p.styles[size]?.center;
+        return `${size}:${stock}`;
+      })
       .join('；');
-
 
     const color = categoryColors[category] || "#999";
 
@@ -145,12 +148,20 @@ function renderProducts(productList) {
   renderCategoryOptions();
 }
 
+// ========================
+// 渲染分類下拉選單
+// ========================
 function renderCategoryOptions() {
   const select = document.getElementById('category-select');
   if (!select) return;
 
   const current = select.value || "全部分類";
-  select.innerHTML = `<option>全部分類</option>`;
+  select.innerHTML = '';
+
+  const optionAll = document.createElement('option');
+  optionAll.value = "全部分類";
+  optionAll.textContent = "全部分類";
+  select.appendChild(optionAll);
 
   Array.from(allCategories).forEach(cat => {
     const option = document.createElement('option');
@@ -161,49 +172,56 @@ function renderCategoryOptions() {
   });
 }
 
+
 // ========================
 // 購物車處理
 // ========================
 function addToCart(productKey) {
   const p = products[productKey];
-  const availableSizes = Object.keys(p.styles).filter(s => p.styles[s].center > 0);
-  const defaultSize = availableSizes[0] || null;
+  const allSizes = Object.keys(p.styles);
+  const defaultSize = allSizes[0] || null;
 
   cart.push({ key: productKey, size: defaultSize, qty: 1 });
   renderCart();
   updateTotal();
 }
 
+
 function renderCart() {
   const area = document.getElementById('cart-area');
   area.innerHTML = '';
 
+  const isManage = window.location.pathname.includes('manage');
+
   cart.forEach((item, index) => {
     const p = products[item.key];
-    const keys = Object.keys(p.styles);
-    const useStandard = keys.every(k => sizeOrder.includes(k));
+    const allSizes = Object.keys(p.styles);
+    const selectedSize = item.size || allSizes[0];
+    const selectedStock = isManage ? p.styles[selectedSize]?.warehouse ?? 0 : p.styles[selectedSize]?.center ?? 0;
 
-    const sortedSizes = useStandard
-      ? sizeOrder.filter(k => keys.includes(k))
-      : keys;
+    const sizeOptions = allSizes.map(size => {
+      const stock = isManage ? p.styles[size]?.warehouse ?? 0 : p.styles[size]?.center ?? 0;
+      const label = stock === 0 ? `${size}（無庫存）` : size;
+      return `<option value="${size}" ${item.size === size ? 'selected' : ''}>${label}</option>`;
+    }).join('');
 
-    const sizeOptions = sortedSizes
-      .map(size => {
-        const stock = p.styles[size].center;
-        const label = stock === 0 ? `${size}（無庫存）` : size;
-        return `<option value="${size}" ${item.size === size ? 'selected' : ''}>${label}</option>`;
-      })
-      .join('');
-
-    const selectedSize = item.size || sortedSizes[0];
-    const maxQty = selectedSize ? p.styles[selectedSize].center : 1;
-
+    const maxQty = Math.max(1, selectedStock);
     const qtyOptions = Array.from({ length: maxQty }, (_, i) => i + 1)
       .map(q => `<option value="${q}" ${q === item.qty ? 'selected' : ''}>${q}</option>`)
       .join('');
 
-    const styleText = sortedSizes
-      .map(size => `${size}:${p.styles[size].center}`)
+    // 顯示所有樣式與該模式下的庫存
+    const keys = Object.keys(p.styles);
+    const useStandard = keys.every(k => sizeOrder.includes(k));
+    const sortedKeys = useStandard
+      ? sizeOrder.filter(k => keys.includes(k))
+      : keys;
+
+    const styleText = sortedKeys
+      .map(size => {
+        const stock = isManage ? p.styles[size]?.warehouse : p.styles[size]?.center;
+        return `${size}:${stock}`;
+      })
       .join('；');
 
     const div = document.createElement('div');
@@ -247,8 +265,16 @@ function updateTotal() {
     const p = products[item.key];
     total += p.price * item.qty;
   });
-  document.getElementById('total-amount').innerText = total;
+
+  // 修正：這行防止找不到元素報錯
+  const elem = document.getElementById('total-amount');
+  if (elem) {
+    elem.innerText = total;
+  }
 }
+
+
+
 
 
 // ========================
@@ -727,4 +753,436 @@ async function submitExchange() {
   } else {
     Swal.fire('錯誤', result.error || '換貨失敗', 'error');
   }
+}
+
+
+
+// ========================
+// 調貨流程彈窗操作邏輯
+// ========================
+function openTransferDialog() {
+  if (cart.length === 0) {
+    Swal.fire('請先加入要調貨的商品');
+    return;
+  }
+
+  const itemsHtml = cart.map(i => {
+    const p = products[i.key];
+    return ` - ${p.name} ${i.size} x${i.qty}`;
+  }).join('<br>');
+
+  Swal.fire({
+    title: '調貨確認',
+    html: `<div style="text-align:left">${itemsHtml}</div>`,
+    showCancelButton: true,
+    confirmButtonText: '送出'
+  }).then(async result => {
+    if (!result.isConfirmed) return;
+
+    const payload = {
+      items: cart.map(i => {
+        const p = products[i.key];
+        return {
+          name: p.name,
+          size: i.size,
+          qty: i.qty
+        };
+      })
+    };
+
+    try {
+      const res = await fetch('/api/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('後端錯誤內容:', text);
+        throw new Error('伺服器錯誤');
+      }
+
+      let resultData;
+      try {
+        resultData = await res.json();
+      } catch (e) {
+        console.error('JSON 解析錯誤:', e);
+        throw new Error('伺服器回應格式錯誤');
+      }
+
+      if (resultData.status === 'success') {
+        cart = [];
+        renderCart();
+        updateTotal();
+
+        const res2 = await fetch('/api/products');
+        products = await res2.json();
+        renderProducts(products);
+
+        Swal.fire('調貨成功');
+      } else {
+        Swal.fire('錯誤', resultData.error || '調貨失敗', 'error');
+      }
+    } catch (err) {
+      console.error('錯誤發生', err);
+      Swal.fire('錯誤', err.message || '伺服器連線錯誤', 'error');
+    }
+  });
+}
+
+
+
+// ========================
+// 補貨流程彈窗操作邏輯
+// ========================
+function openRestockStep1() {
+  if (cart.length === 0) {
+    Swal.fire('請先加入要補貨的商品');
+    return;
+  }
+
+  const html = cart.map((item, index) => {
+    const p = products[item.key];
+    const label = `${p.name} ${item.size}`;
+    return `
+      <div style="margin-bottom: 10px; text-align:left">
+        <label><b>${label}</b></label><br>
+        <input type="number" min="1" value="${item.qty}" id="restock-qty-${index}" style="width:60px">
+      </div>
+    `;
+  }).join('');
+
+  Swal.fire({
+    title: '補貨數量輸入',
+    html: html,
+    showCancelButton: true,
+    confirmButtonText: '下一步',
+    preConfirm: () => {
+      for (let i = 0; i < cart.length; i++) {
+        const input = document.getElementById(`restock-qty-${i}`);
+        const value = parseInt(input.value);
+        if (isNaN(value) || value <= 0) {
+          Swal.showValidationMessage('每筆補貨數量需為正整數');
+          return false;
+        }
+        cart[i].qty = value;  // 更新購物車內數量為補貨數
+      }
+      return true;
+    }
+  }).then(result => {
+    if (result.isConfirmed) {
+      openRestockStep2();
+    }
+  });
+} 
+
+function openRestockStep2() {
+  const itemsHtml = cart.map(i => {
+    const p = products[i.key];
+    return ` - ${p.name} ${i.size} x${i.qty}`;
+  }).join('<br>');
+
+  Swal.fire({
+    title: '補貨確認',
+    html: `<div style="text-align:left">${itemsHtml}</div>`,
+    showCancelButton: true,
+    confirmButtonText: '送出'
+  }).then(async result => {
+    if (!result.isConfirmed) return;
+
+    const payload = {
+      items: cart.map(i => {
+        const p = products[i.key];
+        return {
+          name: p.name,
+          size: i.size,
+          qty: i.qty
+        };
+      })
+    };
+
+    try {
+      const res = await fetch('/api/restock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('後端錯誤內容:', text);
+        throw new Error('伺服器錯誤');
+      }
+
+      const resultData = await res.json();
+      if (resultData.status === 'success') {
+        cart = [];
+        renderCart();
+        updateTotal();
+
+        const res2 = await fetch('/api/products');
+        products = await res2.json();
+        renderProducts(products);
+
+        Swal.fire('補貨成功');
+      } else {
+        Swal.fire('錯誤', resultData.error || '補貨失敗', 'error');
+      }
+    } catch (err) {
+      console.error('錯誤發生', err);
+      Swal.fire('錯誤', err.message || '伺服器連線錯誤', 'error');
+    }
+  });
+}
+
+
+
+
+// ========================
+// 工用流程彈窗操作邏輯
+// ========================
+function openUsageDialog() {
+  if (cart.length === 0) {
+    Swal.fire('請先加入要使用的商品');
+    return;
+  }
+
+  const itemsHtml = cart.map(i => {
+    const p = products[i.key];
+    return ` - ${p.name} ${i.size} x${i.qty}`;
+  }).join('<br>');
+
+  Swal.fire({
+    title: '確認工用商品',
+    html: `
+      <div style="text-align:left; margin-bottom:10px">${itemsHtml}</div>
+      <input type="text" id="usage-reason" class="swal2-input" placeholder="請輸入用途">
+    `,
+    showCancelButton: true,
+    confirmButtonText: '送出',
+    preConfirm: () => {
+      const reason = document.getElementById('usage-reason').value.trim();
+      if (!reason) {
+        Swal.showValidationMessage('請輸入用途');
+        return false;
+      }
+      return reason;
+    }
+  }).then(async result => {
+    if (!result.isConfirmed) return;
+
+    const payload = {
+      reason: result.value,
+      items: cart.map(i => {
+        const p = products[i.key];
+        return {
+          name: p.name,
+          size: i.size,
+          qty: i.qty
+        };
+      })
+    };
+
+    try {
+      const res = await fetch('/api/usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const resultData = await res.json();
+      if (resultData.status === 'success') {
+        cart = [];
+        renderCart();
+        updateTotal();
+
+        const res2 = await fetch('/api/products');
+        products = await res2.json();
+        renderProducts(products);
+
+        Swal.fire('工用紀錄完成');
+      } else {
+        Swal.fire('錯誤', resultData.error || '操作失敗', 'error');
+      }
+    } catch (err) {
+      Swal.fire('錯誤', '伺服器連線失敗', 'error');
+    }
+  });
+}
+
+// ========================
+// 暫用流程彈窗操作邏輯
+// ========================
+function openUsageDialog2() {
+  if (cart.length === 0) {
+    Swal.fire('請先加入要使用的商品');
+    return;
+  }
+
+  const itemsHtml = cart.map(i => {
+    const p = products[i.key];
+    return ` - ${p.name} ${i.size} x${i.qty}`;
+  }).join('<br>');
+
+  Swal.fire({
+    title: '確認暫用商品',
+    html: `
+      <div style="text-align:left; margin-bottom:10px">${itemsHtml}</div>
+      <input type="text" id="usage-reason" class="swal2-input" placeholder="請輸入用途">
+    `,
+    showCancelButton: true,
+    confirmButtonText: '送出',
+    preConfirm: () => {
+      const reason = document.getElementById('usage-reason').value.trim();
+      if (!reason) {
+        Swal.showValidationMessage('請輸入用途');
+        return false;
+      }
+      return reason;
+    }
+  }).then(async result => {
+    if (!result.isConfirmed) return;
+
+    const payload = {
+      reason: result.value,
+      items: cart.map(i => {
+        const p = products[i.key];
+        return {
+          name: p.name,
+          size: i.size,
+          qty: i.qty
+        };
+      })
+    };
+
+    try {
+      const res = await fetch('/api/usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const resultData = await res.json();
+      if (resultData.status === 'success') {
+        cart = [];
+        renderCart();
+        updateTotal();
+
+        const res2 = await fetch('/api/products');
+        products = await res2.json();
+        renderProducts(products);
+
+        Swal.fire('暫用紀錄完成');
+      } else {
+        Swal.fire('錯誤', resultData.error || '操作失敗', 'error');
+      }
+    } catch (err) {
+      Swal.fire('錯誤', '伺服器連線失敗', 'error');
+    }
+  });
+}
+
+
+// ========================
+// 歸還流程彈窗操作邏輯
+// ========================
+function openEscheatStep1() {
+  if (cart.length === 0) {
+    Swal.fire('請先加入要歸還的商品');
+    return;
+  }
+
+  const html = cart.map((item, index) => {
+    const p = products[item.key];
+    const label = `${p.name} ${item.size}`;
+    return `
+      <div style="margin-bottom: 10px; text-align:left">
+        <label><b>${label}</b></label><br>
+        <input type="number" min="1" value="${item.qty}" id="restock-qty-${index}" style="width:60px">
+      </div>
+    `;
+  }).join('');
+
+  Swal.fire({
+    title: '歸還數量輸入',
+    html: html,
+    showCancelButton: true,
+    confirmButtonText: '下一步',
+    preConfirm: () => {
+      for (let i = 0; i < cart.length; i++) {
+        const input = document.getElementById(`restock-qty-${i}`);
+        const value = parseInt(input.value);
+        if (isNaN(value) || value <= 0) {
+          Swal.showValidationMessage('每筆歸還數量需為正整數');
+          return false;
+        }
+        cart[i].qty = value;  // 更新購物車內數量為歸還數
+      }
+      return true;
+    }
+  }).then(result => {
+    if (result.isConfirmed) {
+      openEscheatStep2();
+    }
+  });
+} 
+
+function openEscheatStep2() {
+  const itemsHtml = cart.map(i => {
+    const p = products[i.key];
+    return ` - ${p.name} ${i.size} x${i.qty}`;
+  }).join('<br>');
+
+  Swal.fire({
+    title: '歸還確認',
+    html: `<div style="text-align:left">${itemsHtml}</div>`,
+    showCancelButton: true,
+    confirmButtonText: '送出'
+  }).then(async result => {
+    if (!result.isConfirmed) return;
+
+    const payload = {
+      items: cart.map(i => {
+        const p = products[i.key];
+        return {
+          name: p.name,
+          size: i.size,
+          qty: i.qty
+        };
+      })
+    };
+
+    try {
+      const res = await fetch('/api/restock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('後端錯誤內容:', text);
+        throw new Error('伺服器錯誤');
+      }
+
+      const resultData = await res.json();
+      if (resultData.status === 'success') {
+        cart = [];
+        renderCart();
+        updateTotal();
+
+        const res2 = await fetch('/api/products');
+        products = await res2.json();
+        renderProducts(products);
+
+        Swal.fire('歸還成功');
+      } else {
+        Swal.fire('錯誤', resultData.error || '補貨失敗', 'error');
+      }
+    } catch (err) {
+      console.error('錯誤發生', err);
+      Swal.fire('錯誤', err.message || '伺服器連線錯誤', 'error');
+    }
+  });
 }
