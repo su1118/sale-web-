@@ -227,22 +227,32 @@ def relog_latest():
 
     logs = []
     current = None
-    for line in reversed(lines):
-        if line.startswith('[') and '【退/換貨】' in line:
-            if current:
-                logs.append(current)
-            time = line.split(']')[0][1:]
-            current = {'time': time, 'items': []}
-        elif line.startswith(' - ') and current is not None:
-            parts = line.strip().split()
-            name = parts[1]
-            size = parts[2]
-            qty = int(parts[3][2:])  # x-1 => 1
-            current['items'].append({'name': name, 'size': size, 'qty': qty})
-    if current:
-        logs.append(current)
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i].strip()
 
-    return jsonify(logs[:2])
+        if line.startswith('退回：'):
+            # 開始收集一筆新紀錄的 items
+            current = {'time': '', 'items': []}
+            j = i + 1
+            while j < len(lines) and lines[j].startswith(' - '):
+                parts = lines[j].strip().split()
+                name = parts[1]
+                size = parts[2]
+                qty = int(parts[3][2:])
+                current['items'].append({'name': name, 'size': size, 'qty': qty})
+                j += 1
+
+            # 找上一行的時間資訊
+            if i > 0:
+                time_line = lines[i - 1]
+                time = time_line.split(']')[0][1:]
+                current['time'] = time
+                logs.append(current)
+
+    return jsonify(logs[:3])
+
+
+
 
 @app.route('/api/exchange', methods=['POST'])
 def exchange():
@@ -302,6 +312,96 @@ def exchange():
 
     return jsonify({'status': 'success', 'diff': diff})
 
+
+@app.route('/api/transfer', methods=['POST'])
+def transfer():
+    if 'name' not in session:
+        return jsonify({'error': '未登入'}), 403
+
+    data = request.json
+    items = data.get('items', [])
+    inventory = load_inventory()
+
+    for item in items:
+        name = item.get('name')
+        size = item.get('size')
+        qty = item.get('qty')
+
+        if not name or not size or qty is None:
+            return jsonify({'error': '資料不完整'}), 400
+
+        if name not in inventory:
+            print('找不到商品：', name)
+            return jsonify({'error': f'找不到商品：{name}'}), 400
+        if size not in inventory[name]['styles']:
+            print(f'{name} 無此尺寸：{size}')
+            return jsonify({'error': f'{name} 無此尺寸：{size}'}), 400
+        if inventory[name]['styles'][size]['warehouse'] < qty:
+            print(f'{name} {size} 倉庫庫存不足')
+            return jsonify({'error': f'{name} {size} 倉庫庫存不足'}), 400
+
+        inventory[name]['styles'][size]['warehouse'] -= qty
+        inventory[name]['styles'][size]['center'] += qty
+
+    save_inventory(inventory)
+    return jsonify({'status': 'success'})
+
+@app.route('/api/restock', methods=['POST'])
+def restock():
+    if 'name' not in session:
+        return jsonify({'error': '未登入'}), 403
+
+    data = request.json
+    items = data.get('items', [])
+    inventory = load_inventory()
+
+    for item in items:
+        name = item.get('name')
+        size = item.get('size')
+        qty = item.get('qty')
+
+        if not name or not size or qty is None:
+            return jsonify({'error': '資料不完整'}), 400
+
+        if name not in inventory:
+            return jsonify({'error': f'找不到商品：{name}'}), 400
+        if size not in inventory[name]['styles']:
+            return jsonify({'error': f'{name} 無此尺寸：{size}'}), 400
+
+        inventory[name]['styles'][size]['warehouse'] += qty
+
+    save_inventory(inventory)
+    return jsonify({'status': 'success'})
+
+
+@app.route('/api/usage', methods=['POST'])
+def usage():
+    if 'name' not in session:
+        return jsonify({'error': '未登入'}), 403
+
+    data = request.json
+    reason = data.get('reason')
+    items = data.get('items', [])
+    inventory = load_inventory()
+
+    for item in items:
+        name = item.get('name')
+        size = item.get('size')
+        qty = item.get('qty')
+
+        if not name or not size or qty is None:
+            return jsonify({'error': '資料不完整'}), 400
+        if name not in inventory:
+            return jsonify({'error': f'找不到商品：{name}'}), 400
+        if size not in inventory[name]['styles']:
+            return jsonify({'error': f'{name} 無此尺寸：{size}'}), 400
+        if inventory[name]['styles'][size]['warehouse'] < qty:
+            return jsonify({'error': f'{name} {size} 倉庫庫存不足'}), 400
+
+        inventory[name]['styles'][size]['warehouse'] -= qty
+
+    save_inventory(inventory)
+    return jsonify({'status': 'success'})
 
 
 
