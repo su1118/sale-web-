@@ -190,6 +190,7 @@ body.login-page {
   padding: 15px 25px;
   border: none;
   border-radius: 8px;
+  width: 200px;
   cursor: pointer;
 }
 .bottom-bar button:hover{
