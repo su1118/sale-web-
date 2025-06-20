@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>首頁</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-page">
+  <div class="login-box">
+    <div class="login-title">歡迎使用銷售系統</div>
+    <p>您好，{{ name }}</p>
+    <h4>選擇功能</h4>
+    <div>
+      <button class="function-btn">販售</button>
+      <button class="function-btn">管理</button>
+      <button class="function-btn">紀錄</button>
+    </div>
+    <button onclick="logout()">登出</button>
+  </div>
+
+  <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
