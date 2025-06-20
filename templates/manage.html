@@ -2,12 +2,51 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>首頁</title>
+  <title>商品管理</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <h1>管理</h1>
+
+  <!-- 上方資訊列 -->
+  <div class="top-bar">
+    <div class="search-bar">
+      <select id="category-select">
+        <option>全部分類</option>
+        <!-- 可動態插入分類 -->
+      </select>
+      <input type="text" id="search-keyword" placeholder="輸入關鍵字">
+    </div>
+    <div>
+      <button onclick="logout()" class="login-btn">登出</button>
+      <span id="staff-name" style="margin-left: 5px;">{{ name }}</span>
+    </div>
+  </div>
+
+  <!-- 主體 -->
+  <div class="main-area">
+    <!-- 商品區 -->
+    <div class="product-list" id="product-list">
+      <!-- 每個商品卡片 -->
+      <!-- JS 動態產生 -->
+    </div>
+
+    <!-- 購物車區 -->
+    <div class="cart-area" id="cart-area">
+      <!-- JS 動態產生 -->
+    </div>
+  </div>
+
+  <!-- 下方操作列 -->
+  <div class="bottom-bar">
+    <button onclick="openTransferDialog()">調貨</button>
+    <button onclick="openRestockStep1()">補貨</button>
+    <button onclick="openUsageDialog()">工用</button>
+    <button onclick="openUsageDialog2()">暫用</button>
+    <button onclick="openEscheatStep1()">歸還</button>
+    <button onclick="openGiftStep1()">新增</button>
+  </div>
 
   <script src="{{ url_for('static', filename='main.js') }}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </body>
 </html>
